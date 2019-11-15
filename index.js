@@ -79,16 +79,170 @@ controller.on('rtm_close', function (bot) {
 /**
  * Core bot logic goes here!
  */
-// BEGIN EDITING HERE!
+
+ let GAMEINPROGRESS = false;
+ const GAMETIME = 5 * 60 * 1000;
+ var STARTTIME;
+ var GAMETIMEOUT
 
 controller.on('bot_channel_join', function (bot, message) {
-    bot.reply(message, "I'm here!")
+    bot.reply(message, "HeLlO! i'M sPoNgEbOt!")
 });
 
-controller.hears('hello', 'direct_message', function (bot, message) {
-    bot.reply(message, 'Hello!');
+controller.hears('', ['direct_message', 'mention', 'direct_mention'], function (bot, message) {
+    if (message.text.toLowerCase().includes("play insider")) {
+        // do insider 
+        if(!GAMEINPROGRESS) {
+            GAMEINPROGRESS = true;
+            let players = message.text.split("@");
+            players.shift();
+            playInsider(players, bot, message);
+        } else {
+            bot.reply(message, "Error: Insider game in progress");
+        }
+    } else {
+        // be sarcastic
+        bot.reply(message, sarcasetic(message.text));
+    }
 });
 
+function sarcasetic(text) {
+    return text.split('').map((c,i) => 
+        i % 2 == 0 ? c.toLowerCase() : c.toUpperCase()
+    ).join('');   
+}
+
+function playInsider(playerArray, bot, message) {
+    let max = playerArray.length;
+    console.log(max);
+    if (max < 3) {
+        bot.reply(message, "We need more players");
+    }
+    let master = playerArray.splice(randomIntFromInterval(0, max - 1), 1);
+    master = master.toString().split(">")[0];
+    let insider = playerArray.splice(randomIntFromInterval(0, (max - 2)), 1);
+    insider = insider.toString().split(">")[0];
+
+    let insiderGame = new InsiderGame(master, insider, playerArray, GAMETIME, 0, "TestWord", message);
+    console.log(JSON.stringify(insiderGame));
+    // Notify the insider
+    bot.startPrivateConversation(insiderGame.insidermsg, function(err, convo) {
+        if (err) {
+            convo.say("This is embarassing, but something has gone wrong!");
+        }
+        convo.say("Hello! You are the Insider for this game. The word is: " + insiderGame.word);
+        convo.next();
+    });
+
+    // Start the game
+    insiderGame.startGame(bot);
+
+    GAMETIMEOUT = setTimeout(function(){
+        bot.startConversation(insiderGame.message, function(err, convo) {
+            GAMEINPROGRESS = false;
+            convo.say("Times up! Game over. The secret word for this game was: " + insiderGame.word);
+            insiderGame.endMasterConvo();
+        })}, GAMETIME);
+
+    // Message the master & setup end conditions
+    insiderGame.contactMaster(bot);
+    
+}
+
+function randomIntFromInterval(min, max) { // min and max included 
+    return Math.floor(Math.random() * (max - min + 1) + min);
+}
+
+function stop() {
+    console.log('Exiting bot process');
+    bot.destroy();
+    process.exit(1);
+}
+
+class InsiderGame {
+    constructor(master, insider, players, gametime, votetime, word, message) {
+        this.master = master;
+        this.insider = insider;
+        this.players = players;
+        this.gametime = gametime;
+        this.votetime = votetime;
+        this.word = word;
+        this.message = message;
+        this.mastermsg = JSON.parse(JSON.stringify(message));
+        this.mastermsg.user = this.master;
+        this.insidermsg = JSON.parse(JSON.stringify(message));
+        this.insidermsg.user = this.insider;
+        this.timeStamp = new Date().getTime();
+        this.masterConvo = null;
+    }
+
+    startGame(bot) {
+        let that = this;
+        bot.startConversation(this.message, function(err, convo) {
+            if (!err) {
+                convo.say("Welcome to Insider");
+                convo.say("The Master for this game is: <@" + that.master + ">");
+                convo.say("The Insider knows who they are... The game starts now! You have 5 minutes.");
+                } else {
+                    console.log(err);
+                }
+        });   
+    }
+
+    contactMaster(bot) {
+        let that = this;
+        bot.startPrivateConversation(this.mastermsg, function(err, convo) {
+            if (err) { 
+                convo.say("This is embarassing, but something has gone wrong!");
+            }
+            convo.say("Hello! You are the Master for this game. The word is " + that.word);
+            that.masterConvo = convo;
+            convo.on('end', function(convo) {
+                if (convo.status == 'completed') {
+                    // End the first part of the game
+                    console.log(STARTTIME);
+                    bot.reply(that.message, 'Congratulations. You correctly guessed the word. Time to identify the insider.');
+                    clearTimeout(GAMETIMEOUT);
+                    // Pass game logic to Insider guess thing
+    
+                } else {
+                    GAMEINPROGRESS = false;
+                    bot.reply(that.message, "The game has ended");
+                    clearTimeout(GAMETIMEOUT);
+                }
+            });
+            convo.ask("If the participants guess the word please respond STOP in this thread. To cancel the game respond QUIT in this thread.", [
+                {
+                    pattern: 'stop',
+                    callback: function(response,convo) {
+                        convo.say('Ok!');
+                        convo.next();
+                      }
+                },
+                {
+                    pattern: 'quit',
+                    callback: function(response, convo) {
+                        convo.say('Terminating game.');
+                        convo.stop();
+                    }
+                },
+                {
+                    default: true,
+                    callback: function(response, convo) {
+                        convo.repeat();
+                        convo.next();
+                    }
+                }
+            ]);
+        });
+    }
+
+    endMasterConvo() {
+        if (this.masterConvo) {
+            this.masterConvo.stop();
+        }
+    }
+}
 
 /**
  * AN example of what could be:
