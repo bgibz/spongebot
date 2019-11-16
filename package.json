@@ -1,7 +1,7 @@
 {
-  "name": "easy-peasy-bot",
+  "name": "spongebot",
   "version": "1.0.0",
-  "description": "The awesomest bot evar.",
+  "description": "Sometimes facilitates Insider. Always sarcastic",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -12,16 +12,14 @@
     "slack",
     "bot"
   ],
-  "author": "D.E. Goodman-Wilson",
+  "author": "Brendan Gibson",
   "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/DEGoodmanWilson/easy-peasy-bot-app/issues"
-  },
-  "homepage": "https://github.com/DEGoodmanWilson/easy-peasy-bot-app#readme",
+  "homepage": "https://github.com/bgibz/spongebot",
   "engines": {
     "node": "5.1.1"
   },
   "dependencies": {
+    "botbuilder-adapter-slack": "^1.0.7",
     "botkit": "0.2.2",
     "botkit-storage-mongo": "^1.0.2",
     "mongodb": "^1.4.39"

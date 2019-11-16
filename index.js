@@ -34,7 +34,7 @@ if (process.env.MONGOLAB_URI) {
     };
 } else {
     config = {
-        json_file_store: ((process.env.TOKEN)?'./db_slack_bot_ci/':'./db_slack_bot_a/'), //use a different name if an app or CI
+        json_file_store: ((process.env.TOKEN)?'./db_slack_bot_ci/':'./db_slack_bot_a/'), //use a different name if an app or CI 
     };
 }
 
@@ -43,10 +43,11 @@ if (process.env.MONGOLAB_URI) {
  */
 
 if (process.env.TOKEN || process.env.SLACK_TOKEN) {
-    //Treat this as a custom integration
+    //Treat this as a custom integration (Using this)
     var customIntegration = require('./lib/custom_integrations');
     var token = (process.env.TOKEN) ? process.env.TOKEN : process.env.SLACK_TOKEN;
     var controller = customIntegration.configure(token, config, onInstallation);
+
 } else if (process.env.CLIENT_ID && process.env.CLIENT_SECRET && process.env.PORT) {
     //Treat this as an app
     var app = require('./lib/apps');
@@ -79,17 +80,20 @@ controller.on('rtm_close', function (bot) {
 /**
  * Core bot logic goes here!
  */
-
- let GAMEINPROGRESS = false;
- const GAMETIME = 5 * 60 * 1000;
- var STARTTIME;
- var GAMETIMEOUT
+const INSIDERWORDS = require('./words.json');
+let GAMEINPROGRESS = false;
+const GAMETIME = 5 * 60 * 1000;
+var GAMETIMEOUT
 
 controller.on('bot_channel_join', function (bot, message) {
     bot.reply(message, "HeLlO! i'M sPoNgEbOt!")
 });
 
-controller.hears('', ['direct_message', 'mention', 'direct_mention'], function (bot, message) {
+controller.on('event', async(bot, message) => {
+    await bot.reply(message,`Received an event. ${message.type}`);
+});
+
+controller.hears('', ['mention', 'direct_mention'], function (bot, message) {
     if (message.text.toLowerCase().includes("play insider")) {
         // do insider 
         if(!GAMEINPROGRESS) {
@@ -114,17 +118,17 @@ function sarcasetic(text) {
 
 function playInsider(playerArray, bot, message) {
     let max = playerArray.length;
-    console.log(max);
     if (max < 3) {
         bot.reply(message, "We need more players");
     }
+
     let master = playerArray.splice(randomIntFromInterval(0, max - 1), 1);
     master = master.toString().split(">")[0];
     let insider = playerArray.splice(randomIntFromInterval(0, (max - 2)), 1);
     insider = insider.toString().split(">")[0];
 
-    let insiderGame = new InsiderGame(master, insider, playerArray, GAMETIME, 0, "TestWord", message);
-    console.log(JSON.stringify(insiderGame));
+    let insiderGame = new InsiderGame(master, insider, playerArray, GAMETIME, 0, INSIDERWORDS, message);
+
     // Notify the insider
     bot.startPrivateConversation(insiderGame.insidermsg, function(err, convo) {
         if (err) {
@@ -137,6 +141,7 @@ function playInsider(playerArray, bot, message) {
     // Start the game
     insiderGame.startGame(bot);
 
+    //Timer
     GAMETIMEOUT = setTimeout(function(){
         bot.startConversation(insiderGame.message, function(err, convo) {
             GAMEINPROGRESS = false;
@@ -160,20 +165,20 @@ function stop() {
 }
 
 class InsiderGame {
-    constructor(master, insider, players, gametime, votetime, word, message) {
+    constructor(master, insider, players, gametime, votetime, wordData, message) {
         this.master = master;
         this.insider = insider;
         this.players = players;
         this.gametime = gametime;
         this.votetime = votetime;
-        this.word = word;
         this.message = message;
         this.mastermsg = JSON.parse(JSON.stringify(message));
         this.mastermsg.user = this.master;
         this.insidermsg = JSON.parse(JSON.stringify(message));
         this.insidermsg.user = this.insider;
         this.timeStamp = new Date().getTime();
-        this.masterConvo = null;
+        this.masterConvo = false;
+        this.chooseRandomWord(wordData);
     }
 
     startGame(bot) {
@@ -195,16 +200,21 @@ class InsiderGame {
             if (err) { 
                 convo.say("This is embarassing, but something has gone wrong!");
             }
-            convo.say("Hello! You are the Master for this game. The word is " + that.word);
+            convo.say("Hello! You are the Master for this game. The word is: " + that.word);
             that.masterConvo = convo;
             convo.on('end', function(convo) {
                 if (convo.status == 'completed') {
                     // End the first part of the game
-                    console.log(STARTTIME);
-                    bot.reply(that.message, 'Congratulations. You correctly guessed the word. Time to identify the insider.');
                     clearTimeout(GAMETIMEOUT);
+                    let endTime = new Date().getTime();
+                    let timeExpired = new Date(endTime - that.timeStamp).getSeconds();
+
+                    bot.startConversation(that.message, function(err, convo) {
+                        convo.say('Congratulations. You correctly guessed the word in ' + timeExpired + ' seconds. You will have that much time to identify the insider.');
                     // Pass game logic to Insider guess thing
-    
+                    that.accuseInsider(bot, timeExpired);
+                    })
+                    
                 } else {
                     GAMEINPROGRESS = false;
                     bot.reply(that.message, "The game has ended");
@@ -237,9 +247,63 @@ class InsiderGame {
         });
     }
 
+    accuseInsider(bot, time) {
+        let that = this;
+        let msgCopy = JSON.parse(JSON.stringify(message))
+        let timeout = setTimeout(function(){
+            bot.startConversation(that.message, function(err, convo) {
+                GAMEINPROGRESS = false;
+                convo.ask("Times up! Game over. Do you want to know the identity of the insider? Yes or No.", [
+                    {
+                        pattern: 'yes',
+                        callback: function(response,convo) {
+                            convo.say('Great! The insider for this game was <@' + that.insider + '>!');
+                            convo.next();
+                          }
+                    },
+                    {
+                        pattern: 'No',
+                        callback: function(response, convo) {
+                            convo.say('Ok. HoPe It WaS fUn!');
+                            convo.stop();
+                        }
+                    },
+                    {
+                        default: true,
+                        callback: function(response, convo) {
+                            convo.say(sarcasetic("that wasn't yes or no! goodbye."));
+                            convo.next();
+                        }
+                    }
+                ]);
+                //insiderGame.endMasterConvo();
+            })}, (time * 1000));
+        // Tally votes
+        /*
+        this.playerArray.forEach((element) =>{
+            msgCopy.user = element;
+            // TODO: Wrap all in a promise, tally votes in promise.all and determine who was the insider.
+            let myPromise = new Promise(function(resolve, reject) {
+                bot.startPrivateConversation(msgCopy, function(err, convo) {
+                    convo.on('end', function(convo) {
+                        promise1.resolve()
+                    }); 
+                });
+            });
+        });
+        */
+    }
+
+    chooseRandomWord(collection) {
+        let max = collection.words.length;
+        this.word = collection.words.splice(randomIntFromInterval(0, max - 1), 1)
+
+    }
+
     endMasterConvo() {
         if (this.masterConvo) {
             this.masterConvo.stop();
+            this.masterConvo = false;
         }
     }
 }
